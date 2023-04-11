@@ -206,6 +206,11 @@ export default class Block extends EventsDispatcher<BlockEvents> {
   private readonly modificationDebounceTimer = 450;
 
   /**
+   * We can disconnect mutation
+   */
+  private updateObserverSilenced = false;
+
+  /**
    * Is fired when DOM mutation has been happened
    *
    * mutationsOrInputEvent — actual changes
@@ -214,6 +219,23 @@ export default class Block extends EventsDispatcher<BlockEvents> {
    *   - undefined — manual triggering of block.dispatchChange()
    */
   private didMutated = _.debounce((mutationsOrInputEvent: MutationRecord[] | InputEvent = undefined): void => {
+    /**
+     * If tool updates its own root element, we need to renew it in our memory
+     */
+    if ('length' in mutationsOrInputEvent) {
+      this.detectToolRootChange(mutationsOrInputEvent);
+    }
+
+    /**
+     * If
+     */
+    if (this.updateObserverSilenced === true) {
+
+      console.warn('SKEP');
+
+      return;
+    }
+
     /**
      * We won't fire a Block mutation event if mutation contain only nodes marked with 'data-mutation-free' attributes
      */
@@ -319,6 +341,19 @@ export default class Block extends EventsDispatcher<BlockEvents> {
     this.composeTunes(tunesData);
 
     this.holder = this.compose();
+
+    /**
+     * Observe DOM mutations to update Block inputs
+     */
+    this.mutationObserver.observe(
+      this.holder.firstElementChild,
+      {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+      }
+    );
   }
 
   /**
@@ -715,18 +750,7 @@ export default class Block extends EventsDispatcher<BlockEvents> {
    * Is fired when Block will be selected as current
    */
   public willSelect(): void {
-    /**
-     * Observe DOM mutations to update Block inputs
-     */
-    this.mutationObserver.observe(
-      this.holder.firstElementChild,
-      {
-        childList: true,
-        subtree: true,
-        characterData: true,
-        attributes: true,
-      }
-    );
+    this.updateObserverSilenced = false;
 
     /**
      * Mutation observer doesn't track changes in "<input>" and "<textarea>"
@@ -739,7 +763,7 @@ export default class Block extends EventsDispatcher<BlockEvents> {
    * Is fired when Block will be unselected
    */
   public willUnselect(): void {
-    this.mutationObserver.disconnect();
+    this.updateObserverSilenced = true;
     this.removeInputEvents();
   }
 
@@ -911,6 +935,25 @@ export default class Block extends EventsDispatcher<BlockEvents> {
 
       if ($.isNativeInput(input)) {
         input.removeEventListener('input', this.didMutated);
+      }
+    });
+  }
+
+  /**
+   * Sometimes Tool can replace own main element, for example H2 -> H4 or UL -> OL
+   * We need to detect such changes and update a link to tools main element with the new one
+   *
+   * @param mutations - records of block content mutations
+   */
+  private detectToolRootChange(mutations: MutationRecord[]): void {
+    mutations.forEach(record => {
+      const toolRootHasBeenUpdated = Array.from(record.removedNodes).includes(this.toolRenderedElement);
+
+      if (toolRootHasBeenUpdated) {
+        const newToolElement = record.addedNodes[record.addedNodes.length - 1];
+
+        console.warn('Original element changed', newToolElement);
+        this.toolRenderedElement = newToolElement as HTMLElement;
       }
     });
   }
